@@ -1,0 +1,60 @@
+# PdfCraft Windows x64 构建（内网 CJK 乱码修复版）
+#
+# 用法：放进你 fork 的仓库 .github/workflows/build.yml，push 后在 Actions 页
+# 手动 Run workflow，构建完成后在该次运行的 Artifacts 处下载 zip。
+#
+# 说明：
+# - 基于 master 分支构建，含 Issue #826 的简体中文界面修复（system_fonts.rs
+#   会按界面语言加载系统中文字体 msyh.ttc 等做字形回退），v0.6.0 及以前版本缺失。
+# - 不注入 craft-fonts（可选日文字体输入），中文字形全部由系统字体回退绘制，
+#   与官方 Windows 测试构建的配置一致（见官方 ci.yml：Windows tests the build without it）。
+name: Build Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x64
+
+      - name: Build release binaries
+        shell: pwsh
+        run: |
+          # 官方 CI 在 Windows 构建上的同款开关：要求 exe 带版本/图标资源
+          $env:PDFCRAFT_REQUIRE_WINRES = '1'
+          cargo build --release --locked -p pdfcraft -p pdfcraft-cli
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $stage = "stage/pdfcraft-windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/pdfcraft.exe $stage/
+          Copy-Item target/release/pdfcraft-cli.exe $stage/
+          Copy-Item LICENSE-APACHE, LICENSE-MIT, NOTICE $stage/
+          Compress-Archive -Path "$stage/*" -DestinationPath pdfcraft-windows-x64-portable.zip -Force
+          Get-ChildItem $stage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfcraft-windows-x64-portable
+          path: pdfcraft-windows-x64-portable.zip
+          retention-days: 90
